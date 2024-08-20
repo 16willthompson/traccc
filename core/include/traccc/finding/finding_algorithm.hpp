@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -12,6 +12,7 @@
 #include "traccc/edm/measurement.hpp"
 #include "traccc/edm/track_candidate.hpp"
 #include "traccc/edm/track_state.hpp"
+#include "traccc/finding/ckf_aborter.hpp"
 #include "traccc/finding/finding_config.hpp"
 #include "traccc/finding/interaction_register.hpp"
 #include "traccc/fitting/kalman_filter/gain_matrix_updater.hpp"
@@ -43,41 +44,35 @@ class finding_algorithm
           const measurement_collection_types::host&,
           const bound_track_parameters_collection_types::host&)> {
 
-    /// Transform3 type
-    using transform3_type = typename stepper_t::transform3_type;
-
     /// Detector type
     using detector_type = typename navigator_t::detector_type;
     using cxt_t = typename detector_type::geometry_context;
 
-    /// Actor types
-    using transporter = detray::parameter_transporter<transform3_type>;
-    using interactor = detray::pointwise_material_interactor<transform3_type>;
-
+    /// Algebra types
+    using algebra_type = typename detector_type::algebra_type;
     /// scalar type
-    using scalar_type = typename transform3_type::scalar_type;
+    using scalar_type = detray::dscalar<algebra_type>;
+
+    /// Actor types
+    using transporter = detray::parameter_transporter<algebra_type>;
+    using interactor = detray::pointwise_material_interactor<algebra_type>;
 
     /// Actor chain for propagate to the next surface and its propagator type
     using actor_type =
         detray::actor_chain<std::tuple, detray::pathlimit_aborter, transporter,
                             interaction_register<interactor>, interactor,
-                            detray::next_surface_aborter>;
+                            ckf_aborter>;
 
     using propagator_type =
         detray::propagator<stepper_t, navigator_t, actor_type>;
 
-    using intersection_type =
-        detray::intersection2D<typename detector_type::surface_type,
-                               transform3_type>;
-
-    using interactor_type =
-        detray::pointwise_material_interactor<transform3_type>;
+    using interactor_type = detray::pointwise_material_interactor<algebra_type>;
 
     using bfield_type = typename stepper_t::magnetic_field_type;
 
     public:
     /// Configuration type
-    using config_type = finding_config<scalar_type>;
+    using config_type = finding_config;
 
     /// Constructor for the finding algorithm
     ///
@@ -86,7 +81,7 @@ class finding_algorithm
     finding_algorithm(const config_type& cfg) : m_cfg(cfg) {}
 
     /// Get config object (const access)
-    const finding_config<scalar_type>& get_config() const { return m_cfg; }
+    const finding_config& get_config() const { return m_cfg; }
 
     /// Run the algorithm
     ///

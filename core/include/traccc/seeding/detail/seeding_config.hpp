@@ -23,34 +23,34 @@ struct seedfinder_config {
     // without any spacepoints
     // m_config.zMin = -2800.;
     // m_config.zMax = 2800.;
-    scalar zMin = -1186 * unit<scalar>::mm;
-    scalar zMax = 1186 * unit<scalar>::mm;
-    scalar rMax = 200 * unit<scalar>::mm;
+    float zMin = -1186.f * unit<float>::mm;
+    float zMax = 1186.f * unit<float>::mm;
+    float rMax = 200.f * unit<float>::mm;
     // WARNING: if rMin is smaller than impactMax, the bin size will be 2*pi,
     // which will make seeding very slow!
-    scalar rMin = 33 * unit<scalar>::mm;
+    float rMin = 33.f * unit<float>::mm;
 
     // Geometry Settings
     // Detector ROI
     // limiting location of collision region in z
-    scalar collisionRegionMin = -250 * unit<scalar>::mm;
-    scalar collisionRegionMax = +250 * unit<scalar>::mm;
-    scalar phiMin = -M_PI;
-    scalar phiMax = M_PI;
+    float collisionRegionMin = -250 * unit<float>::mm;
+    float collisionRegionMax = +250 * unit<float>::mm;
+    float phiMin = static_cast<float>(-M_PI);
+    float phiMax = static_cast<float>(M_PI);
 
     // Seed Cuts
     // lower cutoff for seeds in MeV
-    scalar minPt = 500. * unit<scalar>::MeV;
+    float minPt = 500.f * unit<float>::MeV;
     // cot of maximum theta angle
     // equivalent to 2.7 eta (pseudorapidity)
-    scalar cotThetaMax = 7.40627;
+    float cotThetaMax = 7.40627f;
     // minimum distance in mm in r between two measurements within one seed
-    scalar deltaRMin = 1 * unit<scalar>::mm;
+    float deltaRMin = 1 * unit<float>::mm;
     // maximum distance in mm in r between two measurements within one seed
-    scalar deltaRMax = 60 * unit<scalar>::mm;
+    float deltaRMax = 60 * unit<float>::mm;
 
     // FIXME: this is not used yet
-    //        scalar upperPtResolutionPerSeed = 20* Acts::GeV;
+    //        float upperPtResolutionPerSeed = 20* Acts::GeV;
 
     // the delta for inverse helix radius up to which compared seeds
     // are considered to have a compatible radius. delta of inverse radius
@@ -59,43 +59,43 @@ struct seedfinder_config {
     // compatible
 
     // impact parameter in mm
-    scalar impactMax = 10. * unit<scalar>::mm;
+    float impactMax = 10. * unit<float>::mm;
     // how many sigmas of scattering angle should be considered?
-    scalar sigmaScattering = 1.0;
+    float sigmaScattering = 1.0;
     // Upper pt limit for scattering calculation
-    scalar maxPtScattering = 10 * unit<scalar>::GeV;
+    float maxPtScattering = 10 * unit<float>::GeV;
 
     // for how many seeds can one SpacePoint be the middle SpacePoint?
     int maxSeedsPerSpM = 20;
 
-    scalar bFieldInZ = 1.99724 * unit<scalar>::T;
+    float bFieldInZ = 1.99724f * unit<float>::T;
     // location of beam in x,y plane.
     // used as offset for Space Points
-    vector2 beamPos{-.0 * unit<scalar>::mm, -.0 * unit<scalar>::mm};
+    vector2 beamPos{-.0 * unit<float>::mm, -.0 * unit<float>::mm};
 
     // average radiation lengths of material on the length of a seed. used for
     // scattering.
     // default is 5%
     // TODO: necessary to make amount of material dependent on detector region?
-    scalar radLengthPerSeed = 0.05;
+    float radLengthPerSeed = 0.05f;
     // alignment uncertainties, used for uncertainties in the
     // non-measurement-plane of the modules
     // which otherwise would be 0
     // will be added to spacepoint measurement uncertainties (and therefore also
     // multiplied by sigmaError)
     // FIXME: call align1 and align2
-    scalar zAlign = 0 * unit<scalar>::mm;
-    scalar rAlign = 0 * unit<scalar>::mm;
+    float zAlign = 0 * unit<float>::mm;
+    float rAlign = 0 * unit<float>::mm;
     // used for measurement (+alignment) uncertainties.
     // find seeds within 5sigma error ellipse
-    scalar sigmaError = 5;
+    float sigmaError = 5;
 
     // derived values, set on Seedfinder construction
-    scalar highland = 0;
-    scalar maxScatteringAngle2 = 0;
-    scalar pTPerHelixRadius = 0;
-    scalar minHelixDiameter2 = 0;
-    scalar pT2perRadius = 0;
+    float highland = 0;
+    float maxScatteringAngle2 = 0;
+    float pTPerHelixRadius = 0;
+    float minHelixDiameter2 = 0;
+    float pT2perRadius = 0;
 
     // Multiplicator for the number of phi-bins. The minimum number of phi-bins
     // depends on min_pt, magnetic field: 2*M_PI/(minPT particle
@@ -114,25 +114,26 @@ struct seedfinder_config {
 
     TRACCC_HOST_DEVICE
     unsigned int get_max_neighbor_bins() const {
-        return std::pow(neighbor_scope[0] + neighbor_scope[1] + 1, 2);
+        unsigned int t = neighbor_scope[0] + neighbor_scope[1] + 1;
+        return t * t;
     }
 
     // Configure unset parameters
     TRACCC_HOST_DEVICE
     void setup() {
-        highland = 13.6 * traccc::unit<traccc::scalar>::MeV *
+        highland = 13.6f * traccc::unit<float>::MeV *
                    std::sqrt(radLengthPerSeed) *
-                   (1 + 0.038 * std::log(radLengthPerSeed));
+                   (1.f + 0.038f * std::log(radLengthPerSeed));
 
         float maxScatteringAngle = highland / minPt;
         maxScatteringAngle2 = maxScatteringAngle * maxScatteringAngle;
 
         pTPerHelixRadius = bFieldInZ;
-        minHelixDiameter2 = std::pow(minPt * 2 / pTPerHelixRadius, 2);
+        minHelixDiameter2 = std::pow(minPt * 2.f / pTPerHelixRadius, 2.f);
 
         // @TODO: This is definitely a bug because highland / pTPerHelixRadius
         // is in length unit
-        pT2perRadius = std::pow(highland / pTPerHelixRadius, 2);
+        pT2perRadius = std::pow(highland / pTPerHelixRadius, 2.f);
     }
 };
 
@@ -154,29 +155,29 @@ struct spacepoint_grid_config {
           phiBinDeflectionCoverage(finder_config.phiBinDeflectionCoverage) {}
 
     // magnetic field in kTesla
-    scalar bFieldInZ;
+    float bFieldInZ;
     // minimum pT to be found by seedfinder in MeV
-    scalar minPt;
+    float minPt;
     // maximum extension of sensitive detector layer relevant for seeding as
     // distance from x=y=0 (i.e. in r) in mm
-    scalar rMax;
+    float rMax;
     // maximum extension of sensitive detector layer relevant for seeding in
     // positive direction in z in mm
-    scalar zMax;
+    float zMax;
     // maximum extension of sensitive detector layer relevant for seeding in
     // negative direction in z in mm
-    scalar zMin;
+    float zMin;
     // maximum distance in r from middle space point to bottom or top spacepoint
     // in mm
-    scalar deltaRMax;
+    float deltaRMax;
     // maximum forward direction expressed as cot(theta)
-    scalar cotThetaMax;
+    float cotThetaMax;
     // impact parameter in mm
-    scalar impactMax;
+    float impactMax;
     // minimum phi value for phiAxis construction
-    scalar phiMin = -M_PI;
+    float phiMin = static_cast<float>(-M_PI);
     // maximum phi value for phiAxis construction
-    scalar phiMax = M_PI;
+    float phiMax = static_cast<float>(M_PI);
     // Multiplicator for the number of phi-bins. The minimum number of phi-bins
     // depends on min_pt, magnetic field: 2*M_PI/(minPT particle
     // phi-deflection). phiBinDeflectionCoverage is a multiplier for this
@@ -189,15 +190,15 @@ struct spacepoint_grid_config {
 struct seedfilter_config {
     // the allowed delta between two inverted seed radii for them to be
     // considered compatible.
-    scalar deltaInvHelixDiameter = 0.00003 / unit<scalar>::mm;
+    float deltaInvHelixDiameter = 0.00003f / unit<float>::mm;
     // the impact parameters (d0) is multiplied by this factor and subtracted
     // from weight
-    scalar impactWeightFactor = 1.;
+    float impactWeightFactor = 1.f;
     // seed weight increased by this value if a compatible seed has been found.
-    scalar compatSeedWeight = 200.;
+    float compatSeedWeight = 200.f;
     // minimum distance between compatible seeds to be considered for weight
     // boost
-    scalar deltaRMin = 5. * unit<scalar>::mm;
+    float deltaRMin = 5.f * unit<float>::mm;
     // in dense environments many seeds may be found per middle space point.
     // only seeds with the highest weight will be kept if this limit is reached.
     unsigned int maxSeedsPerSpM = 20;
@@ -209,17 +210,17 @@ struct seedfilter_config {
     size_t max_triplets_per_spM = 5;
 
     // seed weight increase
-    scalar good_spB_min_radius = 150. * unit<scalar>::mm;
-    scalar good_spB_weight_increase = 400.;
-    scalar good_spT_max_radius = 150. * unit<scalar>::mm;
-    scalar good_spT_weight_increase = 200.;
+    float good_spB_min_radius = 150.f * unit<float>::mm;
+    float good_spB_weight_increase = 400.f;
+    float good_spT_max_radius = 150.f * unit<float>::mm;
+    float good_spT_weight_increase = 200.f;
 
     // bottom sp cut
-    scalar good_spB_min_weight = 380;
+    float good_spB_min_weight = 380.f;
 
     // seed cut
-    scalar seed_min_weight = 200;
-    scalar spB_min_radius = 43. * unit<scalar>::mm;
+    float seed_min_weight = 200.f;
+    float spB_min_radius = 43.f * unit<float>::mm;
 };
 
 }  // namespace traccc

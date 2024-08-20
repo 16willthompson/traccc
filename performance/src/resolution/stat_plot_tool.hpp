@@ -54,16 +54,16 @@ class stat_plot_tool {
     /// @brief fill the cache
     ///
     /// @param cache the cache for statistics plots
-    /// @param fit_info fitting information that contains statistics
+    /// @param fit_res fitting information that contains statistics
     void fill(stat_plot_cache& cache,
-              const fitter_info<transform3>& fit_info) const;
+              const fitting_result<traccc::default_algebra>& fit_res) const;
 
     /// @brief fill the cache
     ///
     /// @param cache the cache for statistics plots
     /// @param trk_state track state at local measurements
     void fill(stat_plot_cache& cache,
-              const track_state<transform3>& trk_state) const;
+              const track_state<traccc::default_algebra>& trk_state) const;
 
     /// @brief write the statistics plots into ROOT
     ///

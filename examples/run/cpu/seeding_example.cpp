@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022 CERN for the benefit of the ACTS project
+ * (c) 2022-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -16,6 +16,7 @@
 #include "traccc/io/utils.hpp"
 
 // algorithms
+#include "traccc/ambiguity_resolution/greedy_ambiguity_resolution_algorithm.hpp"
 #include "traccc/finding/finding_algorithm.hpp"
 #include "traccc/fitting/fitting_algorithm.hpp"
 #include "traccc/seeding/seeding_algorithm.hpp"
@@ -27,19 +28,21 @@
 #include "traccc/resolution/fitting_performance_writer.hpp"
 
 // options
-#include "traccc/options/common_options.hpp"
-#include "traccc/options/detector_input_options.hpp"
-#include "traccc/options/finding_input_options.hpp"
-#include "traccc/options/handle_argument_errors.hpp"
-#include "traccc/options/propagation_options.hpp"
-#include "traccc/options/seeding_input_options.hpp"
+#include "traccc/options/detector.hpp"
+#include "traccc/options/input_data.hpp"
+#include "traccc/options/performance.hpp"
+#include "traccc/options/program_options.hpp"
+#include "traccc/options/track_finding.hpp"
+#include "traccc/options/track_propagation.hpp"
+#include "traccc/options/track_resolution.hpp"
+#include "traccc/options/track_seeding.hpp"
 
 // Detray include(s).
 #include "detray/core/detector.hpp"
 #include "detray/core/detector_metadata.hpp"
 #include "detray/detectors/bfield.hpp"
-#include "detray/io/common/detector_reader.hpp"
-#include "detray/propagator/navigator.hpp"
+#include "detray/io/frontend/detector_reader.hpp"
+#include "detray/navigation/navigator.hpp"
 #include "detray/propagator/propagator.hpp"
 #include "detray/propagator/rk_stepper.hpp"
 
@@ -47,16 +50,18 @@
 #include <vecmem/memory/host_memory_resource.hpp>
 
 // System include(s).
+#include <cstdlib>
 #include <iostream>
 
 using namespace traccc;
-namespace po = boost::program_options;
 
-int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
-            const traccc::finding_input_config& finding_cfg,
-            const traccc::propagation_options<traccc::scalar>& propagation_opts,
-            const traccc::common_options& common_opts,
-            const traccc::detector_input_options& det_opts) {
+int seq_run(const traccc::opts::track_seeding& seeding_opts,
+            const traccc::opts::track_finding& finding_opts,
+            const traccc::opts::track_propagation& propagation_opts,
+            const traccc::opts::track_resolution& resolution_opts,
+            const traccc::opts::input_data& input_opts,
+            const traccc::opts::detector& detector_opts,
+            const traccc::opts::performance& performance_opts) {
 
     /// Type declarations
     using host_detector_type = detray::detector<>;
@@ -64,7 +69,7 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
     using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
     using rk_stepper_type =
         detray::rk_stepper<b_field_t::view_t,
-                           typename host_detector_type::transform3,
+                           typename host_detector_type::algebra_type,
                            detray::constrained_step<>>;
     using host_navigator_type = detray::navigator<const host_detector_type>;
     using host_fitter_type =
@@ -81,12 +86,18 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
     traccc::fitting_performance_writer fit_performance_writer(
         traccc::fitting_performance_writer::config{});
 
+    traccc::finding_performance_writer::config ar_writer_cfg;
+    ar_writer_cfg.file_path = "performance_track_ambiguity_resolution.root";
+    ar_writer_cfg.algorithm_name = "ambiguity_resolution";
+    traccc::finding_performance_writer ar_performance_writer(ar_writer_cfg);
+
     // Output stats
     uint64_t n_spacepoints = 0;
     uint64_t n_measurements = 0;
     uint64_t n_seeds = 0;
     uint64_t n_found_tracks = 0;
     uint64_t n_fitted_tracks = 0;
+    uint64_t n_ambiguity_free_tracks = 0;
 
     /*****************************
      * Build a geometry
@@ -99,13 +110,15 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
 
     // Read the detector
     detray::io::detector_reader_config reader_cfg{};
-    reader_cfg.add_file(traccc::io::data_directory() + det_opts.detector_file);
-    if (!det_opts.material_file.empty()) {
+    reader_cfg.add_file(traccc::io::data_directory() +
+                        detector_opts.detector_file);
+    if (!detector_opts.material_file.empty()) {
         reader_cfg.add_file(traccc::io::data_directory() +
-                            det_opts.material_file);
+                            detector_opts.material_file);
     }
-    if (!det_opts.grid_file.empty()) {
-        reader_cfg.add_file(traccc::io::data_directory() + det_opts.grid_file);
+    if (!detector_opts.grid_file.empty()) {
+        reader_cfg.add_file(traccc::io::data_directory() +
+                            detector_opts.grid_file);
     }
     auto [host_det, names] =
         detray::io::read_detector<host_detector_type>(host_mr, reader_cfg);
@@ -114,39 +127,39 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
         traccc::io::alt_read_geometry(host_det);
 
     // Seeding algorithm
-    traccc::seedfinder_config finder_config;
-    traccc::spacepoint_grid_config grid_config(finder_config);
-    traccc::seedfilter_config filter_config;
-
-    traccc::seeding_algorithm sa(finder_config, grid_config, filter_config,
-                                 host_mr);
+    traccc::seeding_algorithm sa(seeding_opts.seedfinder,
+                                 {seeding_opts.seedfinder},
+                                 seeding_opts.seedfilter, host_mr);
     traccc::track_params_estimation tp(host_mr);
 
-    // Finding algorithm configuration
-    typename traccc::finding_algorithm<rk_stepper_type,
-                                       host_navigator_type>::config_type cfg;
+    // Propagation configuration
+    detray::propagation::config propagation_config(propagation_opts);
 
-    cfg.min_track_candidates_per_track = finding_cfg.track_candidates_range[0];
-    cfg.max_track_candidates_per_track = finding_cfg.track_candidates_range[1];
-    cfg.constrained_step_size = propagation_opts.step_constraint;
+    // Finding algorithm configuration
+    typename traccc::finding_algorithm<
+        rk_stepper_type, host_navigator_type>::config_type cfg(finding_opts);
+
+    cfg.propagation = propagation_config;
 
     traccc::finding_algorithm<rk_stepper_type, host_navigator_type>
         host_finding(cfg);
 
     // Fitting algorithm object
     typename traccc::fitting_algorithm<host_fitter_type>::config_type fit_cfg;
-    fit_cfg.step_constraint = propagation_opts.step_constraint;
+    fit_cfg.propagation = propagation_config;
+
     traccc::fitting_algorithm<host_fitter_type> host_fitting(fit_cfg);
 
+    traccc::greedy_ambiguity_resolution_algorithm host_ambiguity_resolution{};
+
     // Loop over events
-    for (unsigned int event = common_opts.skip;
-         event < common_opts.events + common_opts.skip; ++event) {
+    for (std::size_t event = input_opts.skip;
+         event < input_opts.events + input_opts.skip; ++event) {
 
         // Read the hits from the relevant event file
         traccc::io::spacepoint_reader_output readOut(&host_mr);
-        traccc::io::read_spacepoints(
-            readOut, event, common_opts.input_directory, surface_transforms,
-            common_opts.input_data_format);
+        traccc::io::read_spacepoints(readOut, event, input_opts.directory,
+                                     surface_transforms, input_opts.format);
         traccc::spacepoint_collection_types::host& spacepoints_per_event =
             readOut.spacepoints;
 
@@ -161,17 +174,17 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
           ----------------------------*/
 
         auto params = tp(spacepoints_per_event, seeds,
-                         {0.f, 0.f, finder_config.bFieldInZ});
+                         {0.f, 0.f, seeding_opts.seedfinder.bFieldInZ});
 
         // Run CKF and KF if we are using a detray geometry
         traccc::track_candidate_container_types::host track_candidates;
         traccc::track_state_container_types::host track_states;
+        traccc::track_state_container_types::host track_states_ar;
 
         // Read measurements
         traccc::io::measurement_reader_output meas_read_out(&host_mr);
         traccc::io::read_measurements(meas_read_out, event,
-                                      common_opts.input_directory,
-                                      traccc::data_format::csv);
+                                      input_opts.directory, input_opts.format);
         traccc::measurement_collection_types::host& measurements_per_event =
             meas_read_out.measurements;
         n_measurements += measurements_per_event.size();
@@ -191,6 +204,15 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
         track_states = host_fitting(host_det, field, track_candidates);
         n_fitted_tracks += track_states.size();
 
+        /*-----------------------------------------
+           Ambiguity Resolution with Greedy Solver
+          -----------------------------------------*/
+
+        if (resolution_opts.run) {
+            track_states_ar = host_ambiguity_resolution(track_states);
+            n_ambiguity_free_tracks += track_states_ar.size();
+        }
+
         /*------------
            Statistics
           ------------*/
@@ -202,11 +224,11 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
           Writer
           ------------*/
 
-        if (common_opts.check_performance) {
+        if (performance_opts.run) {
 
-            traccc::event_map2 evt_map(event, common_opts.input_directory,
-                                       common_opts.input_directory,
-                                       common_opts.input_directory);
+            traccc::event_map2 evt_map(event, input_opts.directory,
+                                       input_opts.directory,
+                                       input_opts.directory);
             sd_performance_writer.write(vecmem::get_data(seeds),
                                         vecmem::get_data(spacepoints_per_event),
                                         evt_map);
@@ -214,21 +236,29 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
             find_performance_writer.write(traccc::get_data(track_candidates),
                                           evt_map);
 
+            if (resolution_opts.run) {
+                ar_performance_writer.write(traccc::get_data(track_states_ar),
+                                            evt_map);
+            }
+
             for (unsigned int i = 0; i < track_states.size(); i++) {
                 const auto& trk_states_per_track = track_states.at(i).items;
 
-                const auto& fit_info = track_states[i].header;
+                const auto& fit_res = track_states[i].header;
 
-                fit_performance_writer.write(trk_states_per_track, fit_info,
+                fit_performance_writer.write(trk_states_per_track, fit_res,
                                              host_det, evt_map);
             }
         }
     }
 
-    if (common_opts.check_performance) {
+    if (performance_opts.run) {
         sd_performance_writer.finalize();
         find_performance_writer.finalize();
         fit_performance_writer.finalize();
+        if (resolution_opts.run) {
+            ar_performance_writer.finalize();
+        }
     }
 
     std::cout << "==> Statistics ... " << std::endl;
@@ -240,40 +270,37 @@ int seq_run(const traccc::seeding_input_config& /*i_cfg*/,
     std::cout << "- created (cpu)  " << n_fitted_tracks << " fitted tracks"
               << std::endl;
 
-    return 0;
+    if (resolution_opts.run) {
+        std::cout << "- created (cpu)  " << n_ambiguity_free_tracks
+                  << " ambiguity free tracks" << std::endl;
+    } else {
+        std::cout << "- ambiguity resolution: deactivated" << std::endl;
+    }
+
+    return EXIT_SUCCESS;
 }
 
 // The main routine
 //
 int main(int argc, char* argv[]) {
-    // Set up the program options
-    po::options_description desc("Allowed options");
 
-    // Add options
-    desc.add_options()("help,h", "Give some help with the program's options");
-    traccc::common_options common_opts(desc);
-    traccc::detector_input_options det_opts(desc);
-    traccc::seeding_input_config seeding_input_cfg(desc);
-    traccc::finding_input_config finding_input_cfg(desc);
-    traccc::propagation_options<traccc::scalar> propagation_opts(desc);
+    // Program options.
+    traccc::opts::detector detector_opts;
+    traccc::opts::input_data input_opts;
+    traccc::opts::track_seeding seeding_opts;
+    traccc::opts::track_finding finding_opts;
+    traccc::opts::track_propagation propagation_opts;
+    traccc::opts::track_resolution resolution_opts;
+    traccc::opts::performance performance_opts;
+    traccc::opts::program_options program_opts{
+        "Full Tracking Chain on the Host (without clusterization)",
+        {detector_opts, input_opts, seeding_opts, finding_opts,
+         propagation_opts, resolution_opts, performance_opts},
+        argc,
+        argv};
 
-    po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-
-    // Check errors
-    traccc::handle_argument_errors(vm, desc);
-
-    // Read options
-    common_opts.read(vm);
-    det_opts.read(vm);
-    seeding_input_cfg.read(vm);
-    finding_input_cfg.read(vm);
-    propagation_opts.read(vm);
-
-    std::cout << "Running " << argv[0] << " " << det_opts.detector_file << " "
-              << common_opts.input_directory << " " << common_opts.events
-              << std::endl;
-
-    return seq_run(seeding_input_cfg, finding_input_cfg, propagation_opts,
-                   common_opts, det_opts);
+    // Run the application.
+    return seq_run(seeding_opts, finding_opts, propagation_opts,
+                   resolution_opts, input_opts, detector_opts,
+                   performance_opts);
 }

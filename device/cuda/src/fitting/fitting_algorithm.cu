@@ -1,23 +1,20 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022 CERN for the benefit of the ACTS project
+ * (c) 2022-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 // Project include(s).
+#include "../utils/cuda_error_handling.hpp"
 #include "../utils/utils.hpp"
 #include "traccc/cuda/fitting/fitting_algorithm.hpp"
-#include "traccc/cuda/utils/definitions.hpp"
 #include "traccc/fitting/device/fit.hpp"
 #include "traccc/fitting/kalman_filter/kalman_fitter.hpp"
 
 // detray include(s).
 #include "detray/core/detector_metadata.hpp"
 #include "detray/detectors/bfield.hpp"
-#include "detray/detectors/telescope_metadata.hpp"
-#include "detray/detectors/toy_metadata.hpp"
-#include "detray/masks/unbounded.hpp"
 #include "detray/propagator/rk_stepper.hpp"
 
 // System include(s).
@@ -48,7 +45,11 @@ template <typename fitter_t>
 fitting_algorithm<fitter_t>::fitting_algorithm(
     const config_type& cfg, const traccc::memory_resource& mr,
     vecmem::copy& copy, stream& str)
-    : m_cfg(cfg), m_mr(mr), m_copy(copy), m_stream(str){};
+    : m_cfg(cfg),
+      m_mr(mr),
+      m_copy(copy),
+      m_stream(str),
+      m_warp_size(details::get_warp_size(str.device())) {}
 
 template <typename fitter_t>
 track_state_container_types::buffer fitting_algorithm<fitter_t>::operator()(
@@ -83,14 +84,14 @@ track_state_container_types::buffer fitting_algorithm<fitter_t>::operator()(
     // Calculate the number of threads and thread blocks to run the track
     // fitting
     if (n_tracks > 0) {
-        const unsigned int nThreads = WARP_SIZE * 2;
+        const unsigned int nThreads = m_warp_size * 2;
         const unsigned int nBlocks = (n_tracks + nThreads - 1) / nThreads;
 
         // Run the track fitting
         kernels::fit<fitter_t><<<nBlocks, nThreads, 0, stream>>>(
             det_view, field_view, m_cfg, navigation_buffer,
             track_candidates_view, track_states_buffer);
-        CUDA_ERROR_CHECK(cudaGetLastError());
+        TRACCC_CUDA_ERROR_CHECK(cudaGetLastError());
     }
 
     m_stream.synchronize();
@@ -103,7 +104,7 @@ using default_detector_type =
     detray::detector<detray::default_metadata, detray::device_container_types>;
 using default_stepper_type =
     detray::rk_stepper<covfie::field<detray::bfield::const_bknd_t>::view_t,
-                       transform3, detray::constrained_step<>>;
+                       default_algebra, detray::constrained_step<>>;
 using default_navigator_type = detray::navigator<const default_detector_type>;
 using default_fitter_type =
     kalman_fitter<default_stepper_type, default_navigator_type>;

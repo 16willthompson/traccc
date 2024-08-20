@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2023 CERN for the benefit of the ACTS project
+ * (c) 2022-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -15,8 +15,7 @@
 #include "detray/core/detector.hpp"
 #include "detray/core/detector_metadata.hpp"
 #include "detray/detectors/bfield.hpp"
-#include "detray/masks/masks.hpp"
-#include "detray/propagator/navigator.hpp"
+#include "detray/navigation/navigator.hpp"
 #include "detray/propagator/propagator.hpp"
 #include "detray/propagator/rk_stepper.hpp"
 #include "detray/simulation/event_generator/track_generators.hpp"
@@ -58,8 +57,9 @@ class KalmanFittingTests
                          detray::device_container_types>;
 
     using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
-    using rk_stepper_type = detray::rk_stepper<b_field_t::view_t, transform3,
-                                               detray::constrained_step<>>;
+    using rk_stepper_type =
+        detray::rk_stepper<b_field_t::view_t, traccc::default_algebra,
+                           detray::constrained_step<>>;
     using host_navigator_type = detray::navigator<const host_detector_type>;
     using host_fitter_type =
         kalman_fitter<rk_stepper_type, host_navigator_type>;
@@ -69,8 +69,8 @@ class KalmanFittingTests
 
     // Use deterministic random number generator for testing
     using uniform_gen_t =
-        detray::random_numbers<scalar, std::uniform_real_distribution<scalar>,
-                               std::seed_seq>;
+        detray::detail::random_numbers<scalar,
+                                       std::uniform_real_distribution<scalar>>;
 
     /// Verify that pull distribtions follow the normal distribution
     ///
@@ -83,16 +83,13 @@ class KalmanFittingTests
     /// Validadte the NDF
     ///
     /// @param host_det Detector object
-    /// @param fit_info Fitting statistics result of a track
+    /// @param fit_res Fitting statistics result of a track
     /// @param track_candidates_per_track Track candidates of a track
     /// @param track_states_per_track Track states of a track
     ///
     void ndf_tests(
-        const fitter_info<transform3>& fit_info,
+        const fitting_result<traccc::default_algebra>& fit_res,
         const track_state_collection_types::host& track_states_per_track);
-
-    virtual void consistency_tests(const track_state_collection_types::host&
-                                       track_states_per_track) const = 0;
 
     // The number of tracks successful with KF
     std::size_t n_success{0u};

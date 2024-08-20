@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2022 CERN for the benefit of the ACTS project
+ * (c) 2021-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -8,6 +8,7 @@
 #pragma once
 
 // Project include(s).
+#include "traccc/definitions/math.hpp"
 #include "traccc/edm/internal_spacepoint.hpp"
 #include "traccc/edm/spacepoint.hpp"
 #include "traccc/seeding/detail/seeding_config.hpp"
@@ -19,7 +20,7 @@
 
 namespace traccc {
 
-inline std::pair<detray::axis::circular<>, detray::axis::regular<>> get_axes(
+inline std::pair<detray::axis2::circular<>, detray::axis2::regular<>> get_axes(
     const spacepoint_grid_config& grid_config, vecmem::memory_resource& mr) {
 
     detray::dindex phiBins;
@@ -57,8 +58,8 @@ inline std::pair<detray::axis::circular<>, detray::axis::regular<>> get_axes(
         // evaluating the azimutal deflection including the maximum impact
         // parameter
         scalar deltaAngleWithMaxD0 =
-            std::abs(std::asin(grid_config.impactMax / (rMin)) -
-                     std::asin(grid_config.impactMax / grid_config.rMax));
+            math::fabs(std::asin(grid_config.impactMax / (rMin)) -
+                       std::asin(grid_config.impactMax / grid_config.rMax));
 
         // evaluating delta Phi based on the inner and outer angle, and the
         // azimutal deflection including the maximum impact parameter Divide by
@@ -81,15 +82,15 @@ inline std::pair<detray::axis::circular<>, detray::axis::regular<>> get_axes(
 
         // divide 2pi by angle delta to get number of phi-bins
         // size is always 2pi even for regions of interest
-        phiBins = std::ceil(2 * M_PI / deltaPhi);
+        phiBins = std::llround(2 * M_PI / deltaPhi + 0.5);
         // need to scale the number of phi bins accordingly to the number of
         // consecutive phi bins in the seed making step.
         // Each individual bin should be approximately a fraction (depending on
         // this number) of the maximum expected azimutal deflection.
     }
 
-    detray::axis::circular m_phi_axis{phiBins, grid_config.phiMin,
-                                      grid_config.phiMax, mr};
+    detray::axis2::circular m_phi_axis{phiBins, grid_config.phiMin,
+                                       grid_config.phiMax, mr};
 
     // TODO: can probably be optimized using smaller z bins
     // and returning (multiple) neighbors only in one z-direction for forward
@@ -100,8 +101,8 @@ inline std::pair<detray::axis::circular<>, detray::axis::regular<>> get_axes(
     detray::dindex zBins = std::max(
         1, (int)std::floor((grid_config.zMax - grid_config.zMin) / zBinSize));
 
-    detray::axis::regular m_z_axis{zBins, grid_config.zMin, grid_config.zMax,
-                                   mr};
+    detray::axis2::regular m_z_axis{zBins, grid_config.zMin, grid_config.zMax,
+                                    mr};
 
     return {m_phi_axis, m_z_axis};
 }
@@ -115,8 +116,8 @@ inline TRACCC_HOST_DEVICE size_t is_valid_sp(const seedfinder_config& config,
     if (spPhi > config.phiMax || spPhi < config.phiMin) {
         return detray::detail::invalid_value<size_t>();
     }
-    size_t r_index = getter::perp(
-        vector2{sp.x() - config.beamPos[0], sp.y() - config.beamPos[1]});
+    size_t r_index = static_cast<size_t>(getter::perp(
+        vector2{sp.x() - config.beamPos[0], sp.y() - config.beamPos[1]}));
 
     if (r_index < config.get_num_rbins()) {
         return r_index;

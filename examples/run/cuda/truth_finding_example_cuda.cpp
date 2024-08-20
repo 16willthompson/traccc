@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -20,11 +20,13 @@
 #include "traccc/io/read_geometry.hpp"
 #include "traccc/io/read_measurements.hpp"
 #include "traccc/io/utils.hpp"
-#include "traccc/options/common_options.hpp"
-#include "traccc/options/detector_input_options.hpp"
-#include "traccc/options/finding_input_options.hpp"
-#include "traccc/options/handle_argument_errors.hpp"
-#include "traccc/options/propagation_options.hpp"
+#include "traccc/options/accelerator.hpp"
+#include "traccc/options/detector.hpp"
+#include "traccc/options/input_data.hpp"
+#include "traccc/options/performance.hpp"
+#include "traccc/options/program_options.hpp"
+#include "traccc/options/track_finding.hpp"
+#include "traccc/options/track_propagation.hpp"
 #include "traccc/performance/collection_comparator.hpp"
 #include "traccc/performance/container_comparator.hpp"
 #include "traccc/performance/timer.hpp"
@@ -35,8 +37,8 @@
 #include "detray/core/detector.hpp"
 #include "detray/core/detector_metadata.hpp"
 #include "detray/detectors/bfield.hpp"
-#include "detray/io/common/detector_reader.hpp"
-#include "detray/propagator/navigator.hpp"
+#include "detray/io/frontend/detector_reader.hpp"
+#include "detray/navigation/navigator.hpp"
 #include "detray/propagator/propagator.hpp"
 #include "detray/propagator/rk_stepper.hpp"
 
@@ -53,12 +55,13 @@
 #include <iostream>
 
 using namespace traccc;
-namespace po = boost::program_options;
 
-int seq_run(const traccc::finding_input_config& i_cfg,
-            const traccc::propagation_options<scalar>& propagation_opts,
-            const traccc::common_options& common_opts,
-            const traccc::detector_input_options& det_opts, bool run_cpu) {
+int seq_run(const traccc::opts::track_finding& finding_opts,
+            const traccc::opts::track_propagation& propagation_opts,
+            const traccc::opts::input_data& input_opts,
+            const traccc::opts::detector& detector_opts,
+            const traccc::opts::performance& performance_opts,
+            const traccc::opts::accelerator& accelerator_opts) {
 
     /// Type declarations
     using host_detector_type = detray::detector<detray::default_metadata,
@@ -69,7 +72,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
 
     using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
     using rk_stepper_type =
-        detray::rk_stepper<b_field_t::view_t, traccc::transform3,
+        detray::rk_stepper<b_field_t::view_t, traccc::default_algebra,
                            detray::constrained_step<>>;
     using host_navigator_type = detray::navigator<const host_detector_type>;
     using host_fitter_type =
@@ -108,13 +111,15 @@ int seq_run(const traccc::finding_input_config& i_cfg,
 
     // Read the detector
     detray::io::detector_reader_config reader_cfg{};
-    reader_cfg.add_file(traccc::io::data_directory() + det_opts.detector_file);
-    if (!det_opts.material_file.empty()) {
+    reader_cfg.add_file(traccc::io::data_directory() +
+                        detector_opts.detector_file);
+    if (!detector_opts.material_file.empty()) {
         reader_cfg.add_file(traccc::io::data_directory() +
-                            det_opts.material_file);
+                            detector_opts.material_file);
     }
-    if (!det_opts.grid_file.empty()) {
-        reader_cfg.add_file(traccc::io::data_directory() + det_opts.grid_file);
+    if (!detector_opts.grid_file.empty()) {
+        reader_cfg.add_file(traccc::io::data_directory() +
+                            detector_opts.grid_file);
     }
     auto [host_det, names] =
         detray::io::read_detector<host_detector_type>(mng_mr, reader_cfg);
@@ -143,22 +148,20 @@ int seq_run(const traccc::finding_input_config& i_cfg,
 
     // Standard deviations for seed track parameters
     static constexpr std::array<traccc::scalar, traccc::e_bound_size> stddevs =
-        {1e-4 * detray::unit<traccc::scalar>::mm,
-         1e-4 * detray::unit<traccc::scalar>::mm,
-         1e-3,
-         1e-3,
-         1e-4 / detray::unit<traccc::scalar>::GeV,
-         1e-4 * detray::unit<traccc::scalar>::ns};
+        {1e-4f * detray::unit<traccc::scalar>::mm,
+         1e-4f * detray::unit<traccc::scalar>::mm,
+         1e-3f,
+         1e-3f,
+         1e-4f / detray::unit<traccc::scalar>::GeV,
+         1e-4f * detray::unit<traccc::scalar>::ns};
+
+    // Propagation configuration
+    detray::propagation::config propagation_config(propagation_opts);
 
     // Finding algorithm configuration
     typename traccc::cuda::finding_algorithm<
-        rk_stepper_type, device_navigator_type>::config_type cfg;
-    cfg.min_track_candidates_per_track = i_cfg.track_candidates_range[0];
-    cfg.max_track_candidates_per_track = i_cfg.track_candidates_range[1];
-    cfg.constrained_step_size = propagation_opts.step_constraint;
-
-    // few tracks (~1 out of 1000 tracks) are missed when chi2_max = 15
-    cfg.chi2_max = 30.f;
+        rk_stepper_type, device_navigator_type>::config_type cfg(finding_opts);
+    cfg.propagation = propagation_config;
 
     // Finding algorithm object
     traccc::finding_algorithm<rk_stepper_type, host_navigator_type>
@@ -168,7 +171,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
 
     // Fitting algorithm object
     typename traccc::fitting_algorithm<host_fitter_type>::config_type fit_cfg;
-    fit_cfg.step_constraint = propagation_opts.step_constraint;
+    fit_cfg.propagation = propagation_config;
 
     traccc::fitting_algorithm<host_fitter_type> host_fitting(fit_cfg);
     traccc::cuda::fitting_algorithm<device_fitter_type> device_fitting(
@@ -180,13 +183,12 @@ int seq_run(const traccc::finding_input_config& i_cfg,
     traccc::seed_generator<host_detector_type> sg(host_det, stddevs);
 
     // Iterate over events
-    for (unsigned int event = common_opts.skip;
-         event < common_opts.events + common_opts.skip; ++event) {
+    for (unsigned int event = input_opts.skip;
+         event < input_opts.events + input_opts.skip; ++event) {
 
         // Truth Track Candidates
-        traccc::event_map2 evt_map2(event, common_opts.input_directory,
-                                    common_opts.input_directory,
-                                    common_opts.input_directory);
+        traccc::event_map2 evt_map2(event, input_opts.directory,
+                                    input_opts.directory, input_opts.directory);
 
         traccc::track_candidate_container_types::host truth_track_candidates =
             evt_map2.generate_truth_candidates(sg, host_mr);
@@ -207,8 +209,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
         // Read measurements
         traccc::io::measurement_reader_output meas_reader_output(mr.host);
         traccc::io::read_measurements(meas_reader_output, event,
-                                      common_opts.input_directory,
-                                      common_opts.input_data_format);
+                                      input_opts.directory, input_opts.format);
         auto& measurements_per_event = meas_reader_output.measurements;
 
         traccc::measurement_collection_types::buffer measurements_cuda_buffer(
@@ -226,7 +227,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
         // Navigation buffer
         auto navigation_buffer = detray::create_candidates_buffer(
             host_det,
-            device_finding.get_config().max_num_branches_per_seed *
+            device_finding.get_config().navigation_buffer_size_scaler *
                 seeds.size(),
             mr.main, mr.host);
 
@@ -262,7 +263,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
             rk_stepper_type, host_navigator_type>::output_type track_candidates;
         traccc::fitting_algorithm<host_fitter_type>::output_type track_states;
 
-        if (run_cpu) {
+        if (accelerator_opts.compare_with_cpu) {
 
             {
                 traccc::performance::timer t("Track finding  (cpu)",
@@ -282,7 +283,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
             }
         }
 
-        if (run_cpu) {
+        if (accelerator_opts.compare_with_cpu) {
 
             // Show which event we are currently presenting the results for.
             std::cout << "===>>> Event " << event << " <<<===" << std::endl;
@@ -304,9 +305,10 @@ int seq_run(const traccc::finding_input_config& i_cfg,
                       << std::endl;
 
             // Compare the track parameters made on the host and on the device.
-            traccc::collection_comparator<traccc::fitter_info<transform3>>
-                compare_fitter_infos{"fitted tracks"};
-            compare_fitter_infos(
+            traccc::collection_comparator<
+                traccc::fitting_result<traccc::default_algebra>>
+                compare_fitting_results{"fitted tracks"};
+            compare_fitting_results(
                 vecmem::get_data(track_states.get_headers()),
                 vecmem::get_data(track_states_cuda.get_headers()));
         }
@@ -317,7 +319,7 @@ int seq_run(const traccc::finding_input_config& i_cfg,
         n_found_tracks_cuda += track_candidates_cuda.size();
         n_fitted_tracks_cuda += track_states_cuda.size();
 
-        if (common_opts.check_performance) {
+        if (performance_opts.run) {
             find_performance_writer.write(
                 traccc::get_data(track_candidates_cuda), evt_map2);
 
@@ -325,15 +327,15 @@ int seq_run(const traccc::finding_input_config& i_cfg,
                 const auto& trk_states_per_track =
                     track_states_cuda.at(i).items;
 
-                const auto& fit_info = track_states_cuda[i].header;
+                const auto& fit_res = track_states_cuda[i].header;
 
-                fit_performance_writer.write(trk_states_per_track, fit_info,
+                fit_performance_writer.write(trk_states_per_track, fit_res,
                                              host_det, evt_map2);
             }
         }
     }
 
-    if (common_opts.check_performance) {
+    if (performance_opts.run) {
         find_performance_writer.finalize();
         fit_performance_writer.finalize();
     }
@@ -355,35 +357,22 @@ int seq_run(const traccc::finding_input_config& i_cfg,
 // The main routine
 //
 int main(int argc, char* argv[]) {
-    // Set up the program options
-    po::options_description desc("Allowed options");
 
-    // Add options
-    desc.add_options()("help,h", "Give some help with the program's options");
-    traccc::common_options common_opts(desc);
-    traccc::detector_input_options det_opts(desc);
-    traccc::finding_input_config finding_input_cfg(desc);
-    traccc::propagation_options<scalar> propagation_opts(desc);
-    desc.add_options()("run_cpu", po::value<bool>()->default_value(false),
-                       "run cpu tracking as well");
+    // Program options.
+    traccc::opts::detector detector_opts;
+    traccc::opts::input_data input_opts;
+    traccc::opts::track_finding finding_opts;
+    traccc::opts::track_propagation propagation_opts;
+    traccc::opts::performance performance_opts;
+    traccc::opts::accelerator accelerator_opts;
+    traccc::opts::program_options program_opts{
+        "Truth Track Finding Using CUDA",
+        {detector_opts, input_opts, finding_opts, propagation_opts,
+         performance_opts, accelerator_opts},
+        argc,
+        argv};
 
-    po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-
-    // Check errors
-    traccc::handle_argument_errors(vm, desc);
-
-    // Read options
-    common_opts.read(vm);
-    det_opts.read(vm);
-
-    finding_input_cfg.read(vm);
-    propagation_opts.read(vm);
-    auto run_cpu = vm["run_cpu"].as<bool>();
-
-    std::cout << "Running " << argv[0] << " " << common_opts.input_directory
-              << " " << common_opts.events << std::endl;
-
-    return seq_run(finding_input_cfg, propagation_opts, common_opts, det_opts,
-                   run_cpu);
+    // Run the application.
+    return seq_run(finding_opts, propagation_opts, input_opts, detector_opts,
+                   performance_opts, accelerator_opts);
 }

@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -11,8 +11,9 @@
 #include "traccc/seeding/experimental/spacepoint_formation.hpp"
 
 // Detray include(s).
-#include "detray/detectors/create_telescope_detector.hpp"
-#include "detray/intersection/detail/trajectories.hpp"
+#include "detray/detectors/build_telescope_detector.hpp"
+#include "detray/geometry/shapes/rectangle2D.hpp"
+#include "detray/navigation/detail/ray.hpp"
 
 // VecMem include(s).
 #include <vecmem/memory/host_memory_resource.hpp>
@@ -28,12 +29,13 @@ TEST(spacepoint_formation, cpu) {
     vecmem::host_memory_resource host_mr;
 
     // Use rectangle surfaces
-    detray::mask<detray::rectangle2D<>> rectangle{
+    detray::mask<detray::rectangle2D> rectangle{
         0u, 10000.f * detray::unit<scalar>::mm,
         10000.f * detray::unit<scalar>::mm};
 
     // Plane alignment direction (aligned to x-axis)
-    detray::detail::ray<transform3> traj{{0, 0, 0}, 0, {1, 0, 0}, -1};
+    detray::detail::ray<traccc::default_algebra> traj{
+        {0, 0, 0}, 0, {1, 0, 0}, -1};
     // Position of planes (in mm unit)
     std::vector<scalar> plane_positions = {20.f,  40.f,  60.f,  80.f, 100.f,
                                            120.f, 140.f, 160.f, 180.f};
@@ -43,10 +45,10 @@ TEST(spacepoint_formation, cpu) {
     tel_cfg.pilot_track(traj);
 
     // Create telescope geometry
-    const auto [det, name_map] = create_telescope_detector(host_mr, tel_cfg);
+    const auto [det, name_map] = build_telescope_detector(host_mr, tel_cfg);
 
     // Surface lookup
-    auto surfaces = det.surface_lookup();
+    auto surfaces = det.surfaces();
 
     // Prepare measurement collection
     typename measurement_collection_types::host measurements{&host_mr};
@@ -63,10 +65,10 @@ TEST(spacepoint_formation, cpu) {
 
     // Check the results
     EXPECT_EQ(spacepoints.size(), 2u);
-    EXPECT_FLOAT_EQ(spacepoints[0].global[0], 20.f);
-    EXPECT_FLOAT_EQ(spacepoints[0].global[1], 7.f);
-    EXPECT_FLOAT_EQ(spacepoints[0].global[2], 2.f);
-    EXPECT_FLOAT_EQ(spacepoints[1].global[0], 180.f);
-    EXPECT_FLOAT_EQ(spacepoints[1].global[1], 10.f);
-    EXPECT_FLOAT_EQ(spacepoints[1].global[2], 15.f);
+    EXPECT_FLOAT_EQ(static_cast<float>(spacepoints[0].global[0]), 20.f);
+    EXPECT_FLOAT_EQ(static_cast<float>(spacepoints[0].global[1]), 7.f);
+    EXPECT_FLOAT_EQ(static_cast<float>(spacepoints[0].global[2]), 2.f);
+    EXPECT_FLOAT_EQ(static_cast<float>(spacepoints[1].global[0]), 180.f);
+    EXPECT_FLOAT_EQ(static_cast<float>(spacepoints[1].global[1]), 10.f);
+    EXPECT_FLOAT_EQ(static_cast<float>(spacepoints[1].global[2]), 15.f);
 }

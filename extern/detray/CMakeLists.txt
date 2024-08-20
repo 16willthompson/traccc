@@ -1,6 +1,6 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2021-2023 CERN for the benefit of the ACTS project
+# (c) 2021-2024 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
@@ -18,11 +18,20 @@ message( STATUS "Building Detray as part of the TRACCC project" )
 
 # Declare where to get Detray from.
 set( TRACCC_DETRAY_SOURCE
-"URL;https://github.com/acts-project/detray/archive/refs/tags/v0.49.0.tar.gz;URL_MD5;d017a48de31e2ee116af870c917bce7f"
+"URL;https://github.com/acts-project/detray/archive/refs/tags/v0.72.1.tar.gz;URL_MD5;342ab0bfba45c5764c8eef3842897c16"
    CACHE STRING "Source for Detray, when built as part of this project" )
 
 mark_as_advanced( TRACCC_DETRAY_SOURCE )
-FetchContent_Declare( Detray ${TRACCC_DETRAY_SOURCE} )
+
+# Mark the import as a system library on modern CMake versions
+if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.25.0)
+   set(TRACCC_DETRAY_SOURCE_FULL "${TRACCC_DETRAY_SOURCE};SYSTEM")
+else()
+   set(TRACCC_DETRAY_SOURCE_FULL "${TRACCC_DETRAY_SOURCE}")
+endif()
+mark_as_advanced( TRACCC_DETRAY_SOURCE_FULL )
+
+FetchContent_Declare( Detray ${TRACCC_DETRAY_SOURCE_FULL} )
 
 # Options used in the build of Detray.
 set( DETRAY_CUSTOM_SCALARTYPE "float" CACHE STRING
@@ -31,7 +40,7 @@ set( DETRAY_CUSTOM_SCALARTYPE "float" CACHE STRING
 set( DETRAY_BUILD_TESTING FALSE CACHE BOOL
    "Turn off the build of the Detray unit tests" )
 set( DETRAY_BUILD_TUTORIALS FALSE CACHE BOOL
-   "Turn off the build of the Detray tutorials" )   
+   "Turn off the build of the Detray tutorials" )
 set( DETRAY_EIGEN_PLUGIN TRUE CACHE BOOL
    "Turn on the build of the Detray Eigen code" )
 set( DETRAY_VC_PLUGIN TRUE CACHE BOOL
@@ -41,8 +50,6 @@ set( DETRAY_SETUP_VECMEM FALSE CACHE BOOL
    "Do not set up VecMem as part of Detray" )
 set( DETRAY_SETUP_ALGEBRA_PLUGINS FALSE CACHE BOOL
    "Do not set up Algebra Plugins as part of Detray" )
-set( DETRAY_SETUP_DFELIBS FALSE CACHE BOOL
-   "Do not set up dfelibs as part of Detray" )
 set( DETRAY_SETUP_GOOGLETEST FALSE CACHE BOOL
    "Do not set up GoogleTest as part of Detray" )
 set( DETRAY_SETUP_BENCHMARK FALSE CACHE BOOL

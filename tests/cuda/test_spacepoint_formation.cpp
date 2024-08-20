@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -11,8 +11,8 @@
 #include "traccc/edm/spacepoint.hpp"
 
 // Detray include(s).
-#include "detray/detectors/create_telescope_detector.hpp"
-#include "detray/intersection/detail/trajectories.hpp"
+#include "detray/detectors/build_telescope_detector.hpp"
+#include "detray/navigation/detail/ray.hpp"
 
 // VecMem include(s).
 #include <vecmem/memory/cuda/device_memory_resource.hpp>
@@ -25,7 +25,7 @@
 
 using namespace traccc;
 
-TEST(spacepoint_formation, cuda) {
+TEST(CUDASpacepointFormation, cuda) {
 
     // Memory resource used by the EDM.
     vecmem::cuda::managed_memory_resource mng_mr;
@@ -38,12 +38,13 @@ TEST(spacepoint_formation, cuda) {
     vecmem::cuda::async_copy copy{stream.cudaStream()};
 
     // Use rectangle surfaces
-    detray::mask<detray::rectangle2D<>> rectangle{
+    detray::mask<detray::rectangle2D> rectangle{
         0u, 10000.f * detray::unit<scalar>::mm,
         10000.f * detray::unit<scalar>::mm};
 
     // Plane alignment direction (aligned to x-axis)
-    detray::detail::ray<transform3> traj{{0, 0, 0}, 0, {1, 0, 0}, -1};
+    detray::detail::ray<traccc::default_algebra> traj{
+        {0, 0, 0}, 0, {1, 0, 0}, -1};
 
     // Position of planes (in mm unit)
     std::vector<scalar> plane_positions = {20.f,  40.f,  60.f,  80.f, 100.f,
@@ -54,13 +55,13 @@ TEST(spacepoint_formation, cuda) {
     tel_cfg.pilot_track(traj);
 
     // Create telescope geometry
-    auto [det, name_map] = create_telescope_detector(mng_mr, tel_cfg);
+    auto [det, name_map] = build_telescope_detector(mng_mr, tel_cfg);
     using device_detector_type =
-        detray::detector<detray::telescope_metadata<detray::rectangle2D<>>,
+        detray::detector<detray::telescope_metadata<detray::rectangle2D>,
                          detray::device_container_types>;
 
     // Surface lookup
-    auto surfaces = det.surface_lookup();
+    auto surfaces = det.surfaces();
 
     // Prepare measurement collection
     measurement_collection_types::host measurements{&mng_mr};

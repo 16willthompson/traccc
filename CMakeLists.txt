@@ -1,19 +1,24 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2021-2023 CERN for the benefit of the ACTS project
+# (c) 2021-2024 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
 # Set up the project.
-cmake_minimum_required( VERSION 3.9 )
-project( traccc VERSION 0.6.0 LANGUAGES CXX )
+cmake_minimum_required( VERSION 3.22 )
+project( traccc VERSION 0.15.0 LANGUAGES CXX )
 
 # Set up the used C++ standard(s).
-set( CMAKE_CXX_STANDARD 17 CACHE STRING "The (host) C++ standard to use" )
+set( CMAKE_CXX_STANDARD 20 CACHE STRING "The (host) C++ standard to use" )
 set( CMAKE_CXX_EXTENSIONS FALSE CACHE BOOL "Disable (host) C++ extensions" )
-set( CMAKE_CUDA_STANDARD 17 CACHE STRING "The (CUDA) C++ standard to use" )
+set( CMAKE_CUDA_STANDARD 20 CACHE STRING "The (CUDA) C++ standard to use" )
 set( CMAKE_CUDA_EXTENSIONS FALSE CACHE BOOL "Disable (CUDA) C++ extensions" )
-set( CMAKE_SYCL_STANDARD 17 CACHE STRING "The (SYCL) C++ standard to use" )
+set( CMAKE_SYCL_STANDARD 20 CACHE STRING "The (SYCL) C++ standard to use" )
+set( CMAKE_HIP_STANDARD 20 CACHE STRING "The (HIP) C++ standard to use" )
+
+if(${CMAKE_CXX_STANDARD} LESS 20)
+   message(SEND_ERROR "CMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}, but traccc requires C++>=20")
+endif()
 
 # Flag controlling whether warnings should make the build fail.
 option( TRACCC_FAIL_ON_WARNINGS
@@ -39,17 +44,9 @@ set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( traccc-functions )
 
-# Check if CUDA is available.
-include( CheckLanguage )
-check_language( CUDA )
-set( TRACCC_BUILD_CUDA_DEFAULT FALSE )
-if( CMAKE_CUDA_COMPILER )
-   set( TRACCC_BUILD_CUDA_DEFAULT TRUE )
-endif()
-
 # Flags controlling which parts of traccc to build.
-option( TRACCC_BUILD_CUDA "Build the CUDA sources included in traccc"
-   ${TRACCC_BUILD_CUDA_DEFAULT} )
+option( TRACCC_BUILD_CUDA "Build the CUDA sources included in traccc" FALSE )
+option( TRACCC_BUILD_HIP "Build the HIP sources included in traccc" FALSE)
 option( TRACCC_BUILD_SYCL "Build the SYCL sources included in traccc" FALSE )
 option( TRACCC_BUILD_FUTHARK "Build the Futhark sources included in traccc"
    FALSE )
@@ -57,15 +54,27 @@ option( TRACCC_BUILD_KOKKOS "Build the Kokkos sources included in traccc"
    FALSE )
 option( TRACCC_BUILD_ALPAKA "Build the Alpaka sources included in traccc"
    FALSE )
+option( TRACCC_BUILD_IO "Build the IO module (needed by examples, performance, testing)" TRUE )
 option( TRACCC_BUILD_TESTING "Build the (unit) tests of traccc" TRUE )
+option( TRACCC_BUILD_BENCHMARKS "Build the benchmarks of traccc" TRUE )
 option( TRACCC_BUILD_EXAMPLES "Build the examples of traccc" TRUE )
 
 # Flags controlling what traccc should use.
 option( TRACCC_USE_SYSTEM_LIBS "Use system libraries be default" FALSE )
 option( TRACCC_USE_ROOT "Use ROOT in the build (if needed)" TRUE )
 
-# Clean up.
-unset( TRACCC_BUILD_CUDA_DEFAULT )
+# Check CUDA and SYCL C++ standards
+if(${TRACCC_BUILD_CUDA} AND ${CMAKE_CUDA_STANDARD} LESS 20)
+   message(SEND_ERROR "CMAKE_CUDA_STANDARD=${CMAKE_CUDA_STANDARD}, but traccc requires C++>=20")
+endif()
+
+if(${TRACCC_BUILD_SYCL} AND ${CMAKE_SYCL_STANDARD} LESS 20)
+   message(SEND_ERROR "CMAKE_SYCL_STANDARD=${CMAKE_SYCL_STANDARD}, but traccc requires C++>=20")
+endif()
+
+if(${TRACCC_BUILD_HIP} AND ${CMAKE_HIP_STANDARD} LESS 20)
+   message(SEND_ERROR "CMAKE_HIP_STANDARD=${CMAKE_HIP_STANDARD}, but traccc requires C++>=20")
+endif()
 
 # Set up VecMem.
 option( TRACCC_SETUP_VECMEM
@@ -97,7 +106,7 @@ if( TRACCC_SETUP_EIGEN3 )
    endif()
 endif()
 
-# Set up Thrust.
+# Set up CCCL.
 option( TRACCC_SETUP_THRUST
    "Set up the Thrust target(s) explicitly" TRUE )
 option( TRACCC_USE_SYSTEM_THRUST
@@ -107,7 +116,7 @@ if( TRACCC_SETUP_THRUST )
    if( TRACCC_USE_SYSTEM_THRUST )
       find_package( Thrust REQUIRED )
    else()
-      add_subdirectory( extern/thrust )
+      add_subdirectory( extern/cccl )
    endif()
 endif()
 # Set up an IMPORTED library on top of the Thrust library/libraries. One that
@@ -116,13 +125,26 @@ set( TRACCC_THRUST_OPTIONS "" CACHE STRING
    "Extra options for configuring how Thrust should be used" )
 mark_as_advanced( TRACCC_THRUST_OPTIONS )
 thrust_create_target( traccc::Thrust ${TRACCC_THRUST_OPTIONS} )
-# Make sure that Thrust/CUB headers are treated as system headers.
-get_target_property( _thrustIncludeDir Thrust::Thrust INTERFACE_INCLUDE_DIRECTORIES )
-get_target_property( _cubIncludeDir CUB::CUB INTERFACE_INCLUDE_DIRECTORIES )
-target_include_directories( traccc::Thrust
-   SYSTEM INTERFACE ${_thrustIncludeDir} ${_cubIncludeDir} )
-unset( _thrustIncludeDir )
-unset( _cubIncludeDir )
+
+# Set up rocThrust.
+option( TRACCC_SETUP_ROCTHRUST
+   "Set up the rocThrust target(s) explicitly" FALSE )
+option( TRACCC_USE_SYSTEM_ROCTHRUST
+   "Pick up an existing installation of rocThrust from the build environment"
+   ${TRACCC_USE_SYSTEM_LIBS} )
+if( TRACCC_SETUP_ROCTHRUST )
+   set( ROCM_WARN_TOOLCHAIN_VAR FALSE CACHE BOOL "Don't print ROCm warnings" )
+   set( ROCM_ERROR_TOOLCHAIN_VAR FALSE CACHE BOOL "Don't print ROCm errors" )
+   mark_as_advanced( ROCM_WARN_TOOLCHAIN_VAR ROCM_ERROR_TOOLCHAIN_VAR )
+   if( TRACCC_USE_SYSTEM_ROCTHRUST )
+      find_package( rocThrust REQUIRED )
+   else()
+      add_subdirectory( extern/rocThrust )
+   endif()
+   # Dress up the rocthrust target a little.
+   target_compile_definitions( rocthrust INTERFACE
+      THRUST_IGNORE_CUB_VERSION_CHECK )
+endif()
 
 # Set up TBB.
 option( TRACCC_SETUP_TBB
@@ -159,6 +181,10 @@ option( TRACCC_USE_SYSTEM_ALPAKA
    "Pick up an existing installation of Alpaka from the build environment"
    ${TRACCC_USE_SYSTEM_LIBS} )
 if( TRACCC_SETUP_ALPAKA )
+   # Default options for the Alpaka build.
+   set( alpaka_ACC_CPU_B_SEQ_T_THREADS_ENABLE TRUE CACHE BOOL
+      "Enable the serial backend of Alpaka" )
+
    if( TRACCC_USE_SYSTEM_ALPAKA )
       find_package( alpaka REQUIRED )
    else()
@@ -230,7 +256,7 @@ option( TRACCC_USE_SYSTEM_ACTS
    ${TRACCC_USE_SYSTEM_LIBS} )
 if( TRACCC_SETUP_ACTS )
    if( TRACCC_USE_SYSTEM_ACTS )
-      find_package( Acts REQUIRED )
+      find_package( Acts REQUIRED COMPONENTS PluginJson )
    else()
       add_subdirectory( extern/acts )
    endif()
@@ -251,6 +277,20 @@ if( TRACCC_SETUP_GOOGLETEST )
       find_package( GTest REQUIRED )
    else()
       add_subdirectory( extern/googletest )
+   endif()
+endif()
+
+# Set up Google Benchmark
+option( TRACCC_SETUP_BENCHMARKS
+   "Set up the Google Benchmark target(s) explicitly" TRUE )
+option( TRACCC_USE_SYSTEM_BENCHMARKS
+   "Pick up an existing installation of Google Benchmark from the build environment"
+   ${TRACCC_USE_SYSTEM_LIBS} )
+if( TRACCC_SETUP_BENCHMARKS )
+   if( TRACCC_USE_SYSTEM_BENCHMARKS )
+      find_package( benchmark REQUIRED )
+   else()
+      add_subdirectory( extern/benchmark )
    endif()
 endif()
 
@@ -277,21 +317,41 @@ endif()
 if( TRACCC_BUILD_ALPAKA )
    add_subdirectory( device/alpaka )
 endif()
-add_subdirectory( io )
-add_subdirectory( performance )
+if ( TRACCC_BUILD_IO )
+   add_subdirectory( io )
+   add_subdirectory( performance )
+   add_subdirectory( simulation )
+else()
+   message(STATUS "traccc::io not built, traccc::performance and traccc::simulation are forcefully switched off.")
+endif()
+
 add_subdirectory( plugins )
-add_subdirectory( simulation )
 
 if ( TRACCC_BUILD_EXAMPLES )
    # Find Boost.
    find_package( Boost REQUIRED COMPONENTS program_options filesystem)
-
+   if ( NOT TRACCC_BUILD_IO )
+      message(FATAL_ERROR "traccc::io is disabled, but it is required to build the examples.")
+   endif()
    add_subdirectory( examples )
 endif()
 
 # Set up the test(s).
 if( BUILD_TESTING AND TRACCC_BUILD_TESTING )
+   if ( NOT TRACCC_BUILD_IO )
+      message(FATAL_ERROR "traccc::io is disabled, but it is required to build the tests.")
+   endif()
    add_subdirectory( tests )
+endif()
+
+# Set up the benchmark(s).
+if( TRACCC_BUILD_BENCHMARKS )
+   # Find Boost.
+   find_package( Boost REQUIRED COMPONENTS filesystem)
+   if ( NOT TRACCC_BUILD_IO )
+      message(FATAL_ERROR "traccc::io is disabled, but it is required to build the tests.")
+   endif()
+   add_subdirectory( benchmarks )
 endif()
 
 if(TRACCC_BUILD_FUTHARK)

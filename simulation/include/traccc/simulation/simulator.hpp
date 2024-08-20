@@ -1,6 +1,6 @@
 /** Detray library, part of the ACTS project (R&D line)
  *
- * (c) 2022-2023 CERN for the benefit of the ACTS project
+ * (c) 2022-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -11,11 +11,11 @@
 #include "traccc/simulation/smearing_writer.hpp"
 
 // Detray include(s).
+#include "detray/navigation/navigator.hpp"
 #include "detray/propagator/actor_chain.hpp"
 #include "detray/propagator/actors/aborters.hpp"
 #include "detray/propagator/actors/parameter_resetter.hpp"
 #include "detray/propagator/actors/parameter_transporter.hpp"
-#include "detray/propagator/navigator.hpp"
 #include "detray/propagator/propagator.hpp"
 #include "detray/propagator/rk_stepper.hpp"
 #include "detray/simulation/random_scatterer.hpp"
@@ -33,21 +33,21 @@ struct simulator {
     using scalar_type = typename detector_t::scalar_type;
 
     struct config {
-        scalar_type overstep_tolerance{-10.f * detray::unit<scalar_type>::um};
-        scalar_type step_constraint{std::numeric_limits<scalar_type>::max()};
+        detray::propagation::config propagation;
     };
 
-    using transform3 = typename detector_t::transform3;
+    using algebra_type = typename detector_t::algebra_type;
     using bfield_type = bfield_t;
 
     using actor_chain_type =
-        detray::actor_chain<dtuple, detray::parameter_transporter<transform3>,
-                            detray::random_scatterer<transform3>,
-                            detray::parameter_resetter<transform3>, writer_t>;
+        detray::actor_chain<detray::dtuple,
+                            detray::parameter_transporter<algebra_type>,
+                            detray::random_scatterer<algebra_type>,
+                            detray::parameter_resetter<algebra_type>, writer_t>;
 
     using navigator_type = detray::navigator<detector_t>;
     using stepper_type =
-        detray::rk_stepper<typename bfield_type::view_t, transform3,
+        detray::rk_stepper<typename bfield_type::view_t, algebra_type,
                            detray::constrained_step<>>;
     using propagator_type =
         detray::propagator<stepper_type, navigator_type, actor_chain_type>;
@@ -87,14 +87,12 @@ struct simulator {
                 typename propagator_type::state propagation(track, m_field,
                                                             m_detector);
 
-                propagator_type p({}, {});
+                propagator_type p(m_cfg.propagation);
 
                 // Set overstep tolerance and stepper constraint
-                propagation._stepping().set_overstep_tolerance(
-                    m_cfg.overstep_tolerance);
                 propagation._stepping.template set_constraint<
                     detray::step::constraint::e_accuracy>(
-                    m_cfg.step_constraint);
+                    m_cfg.propagation.stepping.step_constraint);
 
                 p.propagate(propagation, actor_states);
 
@@ -114,9 +112,9 @@ struct simulator {
     typename writer_t::config m_writer_cfg;
 
     /// Actor states
-    typename detray::parameter_transporter<transform3>::state m_transporter{};
-    typename detray::random_scatterer<transform3>::state m_scatterer{};
-    typename detray::parameter_resetter<transform3>::state m_resetter{};
+    typename detray::parameter_transporter<algebra_type>::state m_transporter{};
+    typename detray::random_scatterer<algebra_type>::state m_scatterer{};
+    typename detray::parameter_resetter<algebra_type>::state m_resetter{};
 };
 
 }  // namespace traccc

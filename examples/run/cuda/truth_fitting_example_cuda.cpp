@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2023 CERN for the benefit of the ACTS project
+ * (c) 2023-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -17,10 +17,12 @@
 #include "traccc/io/read_geometry.hpp"
 #include "traccc/io/read_measurements.hpp"
 #include "traccc/io/utils.hpp"
-#include "traccc/options/common_options.hpp"
-#include "traccc/options/detector_input_options.hpp"
-#include "traccc/options/handle_argument_errors.hpp"
-#include "traccc/options/propagation_options.hpp"
+#include "traccc/options/accelerator.hpp"
+#include "traccc/options/detector.hpp"
+#include "traccc/options/input_data.hpp"
+#include "traccc/options/performance.hpp"
+#include "traccc/options/program_options.hpp"
+#include "traccc/options/track_propagation.hpp"
 #include "traccc/performance/collection_comparator.hpp"
 #include "traccc/performance/container_comparator.hpp"
 #include "traccc/performance/timer.hpp"
@@ -31,8 +33,8 @@
 #include "detray/core/detector.hpp"
 #include "detray/core/detector_metadata.hpp"
 #include "detray/detectors/bfield.hpp"
-#include "detray/io/common/detector_reader.hpp"
-#include "detray/propagator/navigator.hpp"
+#include "detray/io/frontend/detector_reader.hpp"
+#include "detray/navigation/navigator.hpp"
 #include "detray/propagator/propagator.hpp"
 #include "detray/propagator/rk_stepper.hpp"
 
@@ -44,42 +46,29 @@
 #include <vecmem/utils/cuda/async_copy.hpp>
 
 // System include(s).
+#include <cstdlib>
 #include <exception>
 #include <iomanip>
 #include <iostream>
 
 using namespace traccc;
-namespace po = boost::program_options;
 
 // The main routine
 //
 int main(int argc, char* argv[]) {
-    // Set up the program options
-    po::options_description desc("Allowed options");
 
-    // Add options
-    desc.add_options()("help,h", "Give some help with the program's options");
-    traccc::common_options common_opts(desc);
-    traccc::detector_input_options det_opts(desc);
-    traccc::propagation_options<scalar> propagation_opts(desc);
-    desc.add_options()("run_cpu", po::value<bool>()->default_value(false),
-                       "run cpu tracking as well");
-
-    po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-
-    // Check errors
-    traccc::handle_argument_errors(vm, desc);
-
-    // Read options
-    common_opts.read(vm);
-    det_opts.read(vm);
-
-    propagation_opts.read(vm);
-    auto run_cpu = vm["run_cpu"].as<bool>();
-
-    std::cout << "Running " << argv[0] << " " << common_opts.input_directory
-              << " " << common_opts.events << std::endl;
+    // Program options.
+    traccc::opts::detector detector_opts;
+    traccc::opts::input_data input_opts;
+    traccc::opts::track_propagation propagation_opts;
+    traccc::opts::performance performance_opts;
+    traccc::opts::accelerator accelerator_opts;
+    traccc::opts::program_options program_opts{
+        "Truth Track Fitting Using CUDA",
+        {detector_opts, input_opts, propagation_opts, performance_opts,
+         accelerator_opts},
+        argc,
+        argv};
 
     /// Type declarations
     using host_detector_type = detray::detector<detray::default_metadata,
@@ -90,7 +79,7 @@ int main(int argc, char* argv[]) {
 
     using b_field_t = covfie::field<detray::bfield::const_bknd_t>;
     using rk_stepper_type =
-        detray::rk_stepper<b_field_t::view_t, traccc::transform3,
+        detray::rk_stepper<b_field_t::view_t, traccc::default_algebra,
                            detray::constrained_step<>>;
     using host_navigator_type = detray::navigator<const host_detector_type>;
     using host_fitter_type =
@@ -125,13 +114,15 @@ int main(int argc, char* argv[]) {
 
     // Read the detector
     detray::io::detector_reader_config reader_cfg{};
-    reader_cfg.add_file(traccc::io::data_directory() + det_opts.detector_file);
-    if (!det_opts.material_file.empty()) {
+    reader_cfg.add_file(traccc::io::data_directory() +
+                        detector_opts.detector_file);
+    if (!detector_opts.material_file.empty()) {
         reader_cfg.add_file(traccc::io::data_directory() +
-                            det_opts.material_file);
+                            detector_opts.material_file);
     }
-    if (!det_opts.grid_file.empty()) {
-        reader_cfg.add_file(traccc::io::data_directory() + det_opts.grid_file);
+    if (!detector_opts.grid_file.empty()) {
+        reader_cfg.add_file(traccc::io::data_directory() +
+                            detector_opts.grid_file);
     }
     auto [host_det, names] =
         detray::io::read_detector<host_detector_type>(mng_mr, reader_cfg);
@@ -158,16 +149,17 @@ int main(int argc, char* argv[]) {
 
     /// Standard deviations for seed track parameters
     static constexpr std::array<scalar, e_bound_size> stddevs = {
-        0.03 * detray::unit<scalar>::mm,
-        0.03 * detray::unit<scalar>::mm,
-        0.017,
-        0.017,
-        0.01 / detray::unit<scalar>::GeV,
-        1 * detray::unit<scalar>::ns};
+        0.03f * detray::unit<scalar>::mm,
+        0.03f * detray::unit<scalar>::mm,
+        0.017f,
+        0.017f,
+        0.01f / detray::unit<scalar>::GeV,
+        1.f * detray::unit<scalar>::ns};
 
     // Fitting algorithm object
     typename traccc::fitting_algorithm<host_fitter_type>::config_type fit_cfg;
-    fit_cfg.step_constraint = propagation_opts.step_constraint;
+    fit_cfg.propagation = propagation_opts;
+
     traccc::fitting_algorithm<host_fitter_type> host_fitting(fit_cfg);
     traccc::cuda::fitting_algorithm<device_fitter_type> device_fitting(
         fit_cfg, mr, async_copy, stream);
@@ -178,13 +170,12 @@ int main(int argc, char* argv[]) {
     traccc::performance::timing_info elapsedTimes;
 
     // Iterate over events
-    for (unsigned int event = common_opts.skip;
-         event < common_opts.events + common_opts.skip; ++event) {
+    for (unsigned int event = input_opts.skip;
+         event < input_opts.events + input_opts.skip; ++event) {
 
         // Truth Track Candidates
-        traccc::event_map2 evt_map2(event, common_opts.input_directory,
-                                    common_opts.input_directory,
-                                    common_opts.input_directory);
+        traccc::event_map2 evt_map2(event, input_opts.directory,
+                                    input_opts.directory, input_opts.directory);
 
         traccc::track_candidate_container_types::host truth_track_candidates =
             evt_map2.generate_truth_candidates(sg, host_mr);
@@ -217,7 +208,7 @@ int main(int argc, char* argv[]) {
         // CPU container(s)
         traccc::fitting_algorithm<host_fitter_type>::output_type track_states;
 
-        if (run_cpu) {
+        if (accelerator_opts.compare_with_cpu) {
 
             {
                 traccc::performance::timer t("Track fitting  (cpu)",
@@ -229,14 +220,15 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (run_cpu) {
+        if (accelerator_opts.compare_with_cpu) {
             // Show which event we are currently presenting the results for.
             std::cout << "===>>> Event " << event << " <<<===" << std::endl;
 
             // Compare the track parameters made on the host and on the device.
-            traccc::collection_comparator<traccc::fitter_info<transform3>>
-                compare_fitter_infos{"fitted tracks"};
-            compare_fitter_infos(
+            traccc::collection_comparator<
+                traccc::fitting_result<traccc::default_algebra>>
+                compare_fitting_results{"fitted tracks"};
+            compare_fitting_results(
                 vecmem::get_data(track_states.get_headers()),
                 vecmem::get_data(track_states_cuda.get_headers()));
         }
@@ -245,20 +237,20 @@ int main(int argc, char* argv[]) {
         n_fitted_tracks += track_states.size();
         n_fitted_tracks_cuda += track_states_cuda.size();
 
-        if (common_opts.check_performance) {
+        if (performance_opts.run) {
             for (unsigned int i = 0; i < track_states_cuda.size(); i++) {
                 const auto& trk_states_per_track =
                     track_states_cuda.at(i).items;
 
-                const auto& fit_info = track_states_cuda[i].header;
+                const auto& fit_res = track_states_cuda[i].header;
 
-                fit_performance_writer.write(trk_states_per_track, fit_info,
+                fit_performance_writer.write(trk_states_per_track, fit_res,
                                              host_det, evt_map2);
             }
         }
     }
 
-    if (common_opts.check_performance) {
+    if (performance_opts.run) {
         fit_performance_writer.finalize();
     }
 
@@ -269,5 +261,5 @@ int main(int argc, char* argv[]) {
               << std::endl;
     std::cout << "==>Elapsed times...\n" << elapsedTimes << std::endl;
 
-    return 1;
+    return EXIT_SUCCESS;
 }

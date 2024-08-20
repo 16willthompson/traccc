@@ -19,9 +19,7 @@
 #include "traccc/utils/seed_generator.hpp"
 
 // detray include(s).
-#include "detray/detectors/create_telescope_detector.hpp"
-#include "detray/io/common/detector_reader.hpp"
-#include "detray/io/common/detector_writer.hpp"
+#include "detray/io/frontend/detector_reader.hpp"
 #include "detray/propagator/propagator.hpp"
 #include "detray/simulation/event_generator/track_generators.hpp"
 
@@ -93,11 +91,11 @@ TEST_P(CkfSparseTrackTelescopeTests, Run) {
     generator_type generator(gen_cfg);
 
     // Smearing value for measurements
-    traccc::measurement_smearer<transform3> meas_smearer(smearing[0],
-                                                         smearing[1]);
+    traccc::measurement_smearer<traccc::default_algebra> meas_smearer(
+        smearing[0], smearing[1]);
 
-    using writer_type =
-        traccc::smearing_writer<traccc::measurement_smearer<transform3>>;
+    using writer_type = traccc::smearing_writer<
+        traccc::measurement_smearer<traccc::default_algebra>>;
 
     typename writer_type::config smearer_writer_cfg{meas_smearer};
 
@@ -120,8 +118,6 @@ TEST_P(CkfSparseTrackTelescopeTests, Run) {
     // Finding algorithm configuration
     typename traccc::finding_algorithm<rk_stepper_type,
                                        host_navigator_type>::config_type cfg;
-    // few tracks (~1 out of 1000 tracks) are missed when chi2_max = 15
-    cfg.chi2_max = 30.f;
 
     // Finding algorithm object
     traccc::finding_algorithm<rk_stepper_type, host_navigator_type>
@@ -170,13 +166,13 @@ TEST_P(CkfSparseTrackTelescopeTests, Run) {
         for (unsigned int i_trk = 0; i_trk < n_truth_tracks; i_trk++) {
 
             const auto& track_states_per_track = track_states[i_trk].items;
-            const auto& fit_info = track_states[i_trk].header;
+            const auto& fit_res = track_states[i_trk].header;
 
             consistency_tests(track_states_per_track);
 
-            ndf_tests(fit_info, track_states_per_track);
+            ndf_tests(fit_res, track_states_per_track);
 
-            fit_performance_writer.write(track_states_per_track, fit_info,
+            fit_performance_writer.write(track_states_per_track, fit_res,
                                          host_det, evt_map);
         }
     }
@@ -195,8 +191,8 @@ TEST_P(CkfSparseTrackTelescopeTests, Run) {
      * Success rate test
      ********************/
 
-    scalar success_rate =
-        static_cast<scalar>(n_success) / (n_truth_tracks * n_events);
+    float success_rate =
+        static_cast<float>(n_success) / (n_truth_tracks * n_events);
 
     ASSERT_FLOAT_EQ(success_rate, 1.00f);
 }

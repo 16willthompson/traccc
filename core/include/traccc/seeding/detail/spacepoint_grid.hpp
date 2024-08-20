@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2022 CERN for the benefit of the ACTS project
+ * (c) 2021-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -12,7 +12,7 @@
 #include "traccc/edm/spacepoint.hpp"
 
 // detray core
-#include <detray/definitions/indexing.hpp>
+#include <detray/definitions/detail/indexing.hpp>
 #include <detray/grids/axis.hpp>
 #include <detray/grids/grid2.hpp>
 #include <detray/grids/populator.hpp>
@@ -21,18 +21,18 @@
 namespace traccc {
 
 using sp_grid =
-    detray::grid2<detray::attach_populator, detray::axis::circular,
-                  detray::axis::regular, detray::serializer2, detray::dvector,
+    detray::grid2<detray::attach_populator, detray::axis2::circular,
+                  detray::axis2::regular, detray::serializer2, detray::dvector,
                   detray::djagged_vector, detray::darray, detray::dtuple,
                   internal_spacepoint<spacepoint>, false>;
 
 using sp_grid_device = detray::grid2<
-    detray::attach_populator, detray::axis::circular, detray::axis::regular,
+    detray::attach_populator, detray::axis2::circular, detray::axis2::regular,
     detray::serializer2, vecmem::device_vector, vecmem::jagged_device_vector,
     detray::darray, detray::dtuple, internal_spacepoint<spacepoint>, false>;
 using const_sp_grid_device =
-    detray::grid2<detray::attach_populator, detray::axis::circular,
-                  detray::axis::regular, detray::serializer2,
+    detray::grid2<detray::attach_populator, detray::axis2::circular,
+                  detray::axis2::regular, detray::serializer2,
                   vecmem::device_vector, vecmem::jagged_device_vector,
                   detray::darray, detray::dtuple,
                   const internal_spacepoint<spacepoint>, false>;

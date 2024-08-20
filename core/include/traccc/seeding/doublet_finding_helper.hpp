@@ -1,12 +1,14 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2021-2022 CERN for the benefit of the ACTS project
+ * (c) 2021-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
 
 #pragma once
 
+// Local include(s).
+#include "traccc/definitions/math.hpp"
 #include "traccc/edm/internal_spacepoint.hpp"
 #include "traccc/seeding/detail/doublet.hpp"
 #include "traccc/seeding/detail/lin_circle.hpp"
@@ -47,10 +49,10 @@ struct doublet_finding_helper {
 };
 
 template <details::spacepoint_type otherSpType>
-bool doublet_finding_helper::isCompatible(
-    const internal_spacepoint<spacepoint>& sp1,
-    const internal_spacepoint<spacepoint>& sp2,
-    const seedfinder_config& config) {
+bool TRACCC_HOST_DEVICE
+doublet_finding_helper::isCompatible(const internal_spacepoint<spacepoint>& sp1,
+                                     const internal_spacepoint<spacepoint>& sp2,
+                                     const seedfinder_config& config) {
 
     static_assert(otherSpType == details::spacepoint_type::bottom ||
                   otherSpType == details::spacepoint_type::top);
@@ -63,7 +65,7 @@ bool doublet_finding_helper::isCompatible(
         // actually zOrigin * deltaR to avoid division by 0 statements
         scalar zOrigin = sp1.z() * deltaR - sp1.radius() * cotTheta;
         if (deltaR > config.deltaRMax || deltaR < config.deltaRMin ||
-            std::fabs(cotTheta) > config.cotThetaMax * deltaR ||
+            math::fabs(cotTheta) > config.cotThetaMax * deltaR ||
             zOrigin < config.collisionRegionMin * deltaR ||
             zOrigin > config.collisionRegionMax * deltaR) {
             return false;
@@ -76,7 +78,7 @@ bool doublet_finding_helper::isCompatible(
         // actually zOrigin * deltaR to avoid division by 0 statements
         scalar zOrigin = sp1.z() * deltaR - sp1.radius() * cotTheta;
         if (deltaR > config.deltaRMax || deltaR < config.deltaRMin ||
-            std::fabs(cotTheta) > config.cotThetaMax * deltaR ||
+            math::fabs(cotTheta) > config.cotThetaMax * deltaR ||
             zOrigin < config.collisionRegionMin * deltaR ||
             zOrigin > config.collisionRegionMax * deltaR) {
             return false;
@@ -86,7 +88,7 @@ bool doublet_finding_helper::isCompatible(
 }
 
 template <details::spacepoint_type otherSpType>
-lin_circle doublet_finding_helper::transform_coordinates(
+lin_circle TRACCC_HOST_DEVICE doublet_finding_helper::transform_coordinates(
     const internal_spacepoint<spacepoint>& sp1,
     const internal_spacepoint<spacepoint>& sp2) {
 

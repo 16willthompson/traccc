@@ -1,6 +1,6 @@
 # TRACCC library, part of the ACTS project (R&D line)
 #
-# (c) 2021-2023 CERN for the benefit of the ACTS project
+# (c) 2021-2024 CERN for the benefit of the ACTS project
 #
 # Mozilla Public License Version 2.0
 
@@ -69,14 +69,20 @@ traccc_add_library( traccc_io io TYPE SHARED
   "src/csv/read_measurements.hpp"
   "src/csv/read_measurements.cpp"
   "src/csv/make_measurement_hit_id_reader.cpp"
-  "src/csv/make_hit_reader.cpp"  
+  "src/csv/make_hit_reader.cpp"
   "src/csv/make_particle_reader.cpp"
   "src/csv/read_particles.hpp"
-  "src/csv/read_particles.cpp" 
+  "src/csv/read_particles.cpp"
+  "src/obj/write_seeds.hpp"
+  "src/obj/write_seeds.cpp"
+  "src/obj/write_spacepoints.hpp"
+  "src/obj/write_spacepoints.cpp"
+  "src/obj/write_track_candidates.hpp"
+  "src/obj/write_track_candidates.cpp"
   )
 target_link_libraries( traccc_io
   PUBLIC vecmem::core traccc::core ActsCore
-  PRIVATE dfelibs::dfelibs ActsPluginJson )
+  PRIVATE detray::core detray::io dfelibs::dfelibs ActsPluginJson )
 target_compile_definitions( traccc_io
   PRIVATE TRACCC_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/data" )
 if( OpenMP_CXX_FOUND )

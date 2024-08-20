@@ -10,9 +10,6 @@
 // Project include(s).
 #include "traccc/edm/measurement.hpp"
 
-// Detray include(s).
-#include "detray/geometry/barcode.hpp"
-
 // Thrust include(s).
 #include <thrust/pair.h>
 
@@ -23,13 +20,19 @@ namespace traccc {
 struct candidate_link {
 
     // Type of index
-    using link_index_type = thrust::pair<unsigned int, unsigned int>;
+    using link_index_type = thrust::pair<int, unsigned int>;
 
     // Index of link from the previous step
     link_index_type previous;
 
     // Measurement index
     unsigned int meas_idx;
+
+    // Index to the initial seed
+    unsigned int seed_idx;
+
+    // How many times it skipped a surface
+    unsigned int n_skipped;
 };
 
 }  // namespace traccc

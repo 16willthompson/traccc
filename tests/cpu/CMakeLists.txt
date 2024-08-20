@@ -9,6 +9,7 @@ traccc_add_test(cpu
     "compare_with_acts_seeding.cpp"
     "seq_single_module.cpp"
     "test_cca.cpp"
+    "test_ckf_combinatorics_telescope.cpp"
     "test_ckf_sparse_tracks_telescope.cpp"
     "test_clusterization_resolution.cpp"
     "test_copy.cpp"
@@ -19,6 +20,8 @@ traccc_add_test(cpu
     "test_simulation.cpp"
     "test_spacepoint_formation.cpp"
     "test_track_params_estimation.cpp"
+    "test_sanity_ordered_on.cpp"
+    "test_sanity_contiguous_on.cpp"
     LINK_LIBRARIES GTest::gtest_main vecmem::core 
     traccc_tests_common traccc::core traccc::io traccc::performance 
     traccc::simulation detray::core detray::utils covfie::core )

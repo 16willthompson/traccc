@@ -9,7 +9,7 @@
 #pragma once
 
 // Detray include(s).
-#include "detray/definitions/algebra.hpp"
+#include "detray/definitions/detail/algebra.hpp"
 
 // Algebra Plugins include(s).
 #include <algebra/array_cmath.hpp>
@@ -22,8 +22,6 @@
 #include <array>
 #include <map>
 #include <tuple>
-
-#define __plugin algebra::array
 
 namespace traccc {
 

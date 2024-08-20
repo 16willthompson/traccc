@@ -1,6 +1,6 @@
 /** TRACCC library, part of the ACTS project (R&D line)
  *
- * (c) 2022 CERN for the benefit of the ACTS project
+ * (c) 2022-2024 CERN for the benefit of the ACTS project
  *
  * Mozilla Public License Version 2.0
  */
@@ -14,15 +14,15 @@
 #include "traccc/edm/track_candidate.hpp"
 
 // detray include(s).
-#include "detray/propagator/navigator.hpp"
+#include "detray/navigation/navigator.hpp"
 #include "detray/tracks/bound_track_parameters.hpp"
 
 namespace traccc {
 
 /// Fitting result per track
 template <typename algebra_t>
-struct fitter_info {
-    using scalar_type = typename algebra_t::scalar_type;
+struct fitting_result {
+    using scalar_type = detray::dscalar<algebra_t>;
 
     /// Fitted track parameter
     detray::bound_track_parameters<algebra_t> fit_params;
@@ -38,15 +38,15 @@ struct fitter_info {
 template <typename algebra_t>
 struct track_state {
 
+    using scalar_type = detray::dscalar<algebra_t>;
+
     using bound_track_parameters_type =
         detray::bound_track_parameters<algebra_t>;
-    using bound_matrix = typename bound_track_parameters_type::covariance_type;
-    using scalar_type = typename algebra_t::scalar_type;
-    using matrix_operator = typename algebra_t::matrix_actor;
-    using size_type = typename matrix_operator::size_ty;
+    using bound_matrix = detray::bound_matrix<algebra_t>;
+    using matrix_operator = detray::dmatrix_operator<algebra_t>;
+    using size_type = detray::dsize_type<algebra_t>;
     template <size_type ROWS, size_type COLS>
-    using matrix_type =
-        typename matrix_operator::template matrix_type<ROWS, COLS>;
+    using matrix_type = detray::dmatrix<algebra_t, ROWS, COLS>;
 
     track_state() = default;
 
@@ -77,10 +77,26 @@ struct track_state {
                       "The measurement dimension should be 1 or 2");
 
         matrix_type<D, 1> ret;
-        matrix_operator().element(ret, 0, 0) = m_measurement.local[0];
-        if constexpr (D == 2u) {
-            matrix_operator().element(ret, 1, 0) = m_measurement.local[1];
+        if (m_measurement.subs.get_indices()[0] == e_bound_loc0) {
+            matrix_operator().element(ret, 0, 0) = m_measurement.local[0];
+            if constexpr (D == 2u) {
+                matrix_operator().element(ret, 1, 0) = m_measurement.local[1];
+            }
+        } else if (m_measurement.subs.get_indices()[0] == e_bound_loc1) {
+            matrix_operator().element(ret, 0, 0) = m_measurement.local[1];
+            if constexpr (D == 2u) {
+                matrix_operator().element(ret, 1, 0) = m_measurement.local[0];
+            }
+        } else {
+            assert(
+                "The measurement index out of e_bound_loc0 and e_bound_loc1 "
+                "should not happen.");
+            matrix_operator().element(ret, 0, 0) = m_measurement.local[0];
+            if constexpr (D == 2u) {
+                matrix_operator().element(ret, 1, 0) = m_measurement.local[1];
+            }
         }
+
         return ret;
     }
 
@@ -91,11 +107,36 @@ struct track_state {
                       "The measurement dimension should be 1 or 2");
 
         matrix_type<D, D> ret;
-        matrix_operator().element(ret, 0, 0) = m_measurement.variance[0];
-        if constexpr (D == 2u) {
-            matrix_operator().element(ret, 0, 1) = 0.f;
-            matrix_operator().element(ret, 1, 0) = 0.f;
-            matrix_operator().element(ret, 1, 1) = m_measurement.variance[1];
+        if (m_measurement.subs.get_indices()[0] == e_bound_loc0) {
+
+            matrix_operator().element(ret, 0, 0) = m_measurement.variance[0];
+            if constexpr (D == 2u) {
+                matrix_operator().element(ret, 0, 1) = 0.f;
+                matrix_operator().element(ret, 1, 0) = 0.f;
+                matrix_operator().element(ret, 1, 1) =
+                    m_measurement.variance[1];
+            }
+
+        } else if (m_measurement.subs.get_indices()[0] == e_bound_loc1) {
+
+            matrix_operator().element(ret, 0, 0) = m_measurement.variance[1];
+            if constexpr (D == 2u) {
+                matrix_operator().element(ret, 0, 1) = 0.f;
+                matrix_operator().element(ret, 1, 0) = 0.f;
+                matrix_operator().element(ret, 1, 1) =
+                    m_measurement.variance[0];
+            }
+        } else {
+            assert(
+                "The measurement index out of e_bound_loc0 and e_bound_loc1 "
+                "should not happen.");
+            matrix_operator().element(ret, 0, 0) = m_measurement.variance[0];
+            if constexpr (D == 2u) {
+                matrix_operator().element(ret, 0, 1) = 0.f;
+                matrix_operator().element(ret, 1, 0) = 0.f;
+                matrix_operator().element(ret, 1, 1) =
+                    m_measurement.variance[1];
+            }
         }
         return ret;
     }
@@ -163,17 +204,19 @@ struct track_state {
     bound_matrix m_jacobian =
         matrix_operator().template zero<e_bound_size, e_bound_size>();
     bound_track_parameters_type m_predicted;
-    scalar_type m_filtered_chi2;
+    scalar_type m_filtered_chi2 = 0.f;
     bound_track_parameters_type m_filtered;
-    scalar_type m_smoothed_chi2;
+    scalar_type m_smoothed_chi2 = 0.f;
     bound_track_parameters_type m_smoothed;
 };
 
 /// Declare all track_state collection types
-using track_state_collection_types = collection_types<track_state<transform3>>;
+using track_state_collection_types =
+    collection_types<track_state<default_algebra>>;
 
 /// Declare all track_state container types
 using track_state_container_types =
-    container_types<fitter_info<transform3>, track_state<transform3>>;
+    container_types<fitting_result<default_algebra>,
+                    track_state<default_algebra>>;
 
 }  // namespace traccc
